@@ -51,6 +51,8 @@ set output "ZR_isotope.ps"
 set yr [1e6 :1.00E+12 ]
 set y2r [1e6:1.00E+12 ] 
 set size ratio 0.7
+# plotting, including conversion from PKAs/s/target atom of output to PKAs/s/cc 
+# using density and atomic mass of Zr
 pl  \
 "../ZR.out" index 272:272 \
  u (($1+$2)*1e6/2):($3*atoms_per_mole*density/atomic_mass) \

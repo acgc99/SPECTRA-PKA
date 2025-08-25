@@ -60,6 +60,8 @@ set output "ZR_elemental.ps"
 set yr [1e6 :1.00E+12]
 set y2r [1e6:1.00E+12] 
 set size ratio 0.7
+# plotting, including conversion from PKAs/s/target atom of output to PKAs/s/cc 
+# using density (6.506 g/cc) and atomic mass (91.2) of Zr
 pl  \
 "../ZR.out" index 308:308 \
  u (($1+$2)*1e6/2):($3*atoms_per_mole*6.506/91.22364157600980) \
