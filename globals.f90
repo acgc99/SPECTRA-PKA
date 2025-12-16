@@ -45,7 +45,7 @@ MODULE globals
  !real :: starttime, finishtime,currenttime
  
  INTEGER :: i,j,k,l,m,file_index
- INTEGER :: io_open,io_quit,io_read
+ INTEGER(KIND=8) :: io_open,io_quit,io_read
  
  
  ! variables in flux input file

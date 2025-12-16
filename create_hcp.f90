@@ -9,11 +9,11 @@
       SUBROUTINE create_hcp()
       use configs
       IMPLICIT NONE
-      integer :: islx
-      integer :: isly,islz
+      integer(KIND=8) :: islx
+      integer(KIND=8) :: isly,islz
       
-      INTEGER, allocatable :: id(:)
-      integer :: ijk
+      INTEGER(KIND=8), allocatable :: id(:)
+      integer(KIND=8) :: ijk
       REAL (KIND=DBL) :: ww(3),pi
       
       pi=atan2(0._DBL,-1._DBL)
@@ -77,11 +77,11 @@ END SUBROUTINE create_hcp
       SUBROUTINE define_atom_position_hcp(nn,xx)
       use configs
       IMPLICIT NONE
-      integer, INTENT(in) :: nn ! atom number
-      integer :: isly,islz,islx
+      integer(KIND=8), INTENT(in) :: nn ! atom number
+      integer(KIND=8) :: isly,islz,islx
       REAL (KIND=DBL), intent(out) :: xx(3) 
       REAL (KIND=DBL) :: pi
-      integer :: ijk
+      integer(KIND=8) :: ijk
       
       pi=atan2(0._DBL,-1._DBL)
 

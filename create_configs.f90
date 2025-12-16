@@ -9,7 +9,7 @@ MODULE configs
   integer :: io_quit_config,getsize
   integer (kind=8) :: natoms
   INTEGER, ALLOCATABLE :: initial_atom_types_count(:)
-  INTEGER, ALLOCATABLE ::pka_events_id(:)
+  INTEGER(KIND=8), ALLOCATABLE ::pka_events_id(:)
   REAL (KIND=DBL), ALLOCATABLE :: pka_events_vec(:,:),pka_events_ke(:),pka_min_sep(:,:)
   INTEGER, ALLOCATABLE :: pka_events_mass(:),pka_events_step(:)
   CHARACTER (LEN=2), ALLOCATABLE :: pka_events_ele(:)
@@ -28,7 +28,8 @@ SUBROUTINE create_configs
   implicit none
   
 
-  INTEGER :: jcount,kcount,choice,num_events,num_events_previous
+  INTEGER :: jcount,kcount,num_events,num_events_previous
+  INTEGER(KIND=8) :: choice
   INTEGER :: isteps,ii,jj,ichannel,num_PKAs_step,ienergy,ipkas,jenergy
   REAL(KIND=DBL) :: cumtime,ireal,remain,ke,jrealvector(3),irealvector(3)
   logical :: found,bca_flag
@@ -37,7 +38,7 @@ SUBROUTINE create_configs
   CHARACTER (LEN=30) :: date
   INTEGER(8) ::itime,num_above_threshold
   REAL(KIND=DBL) :: total_channelpkas
-  INTEGER, ALLOCATABLE ::temp_pka_events_id(:)
+  INTEGER(KIND=8), ALLOCATABLE ::temp_pka_events_id(:)
   REAL (KIND=DBL), ALLOCATABLE :: temp_pka_events_vec(:,:),temp_pka_events_ke(:),temp_pka_min_sep(:,:)
   INTEGER, ALLOCATABLE :: temp_pka_events_mass(:),temp_pka_events_step(:)
   CHARACTER (LEN=2), ALLOCATABLE :: temp_pka_events_ele(:)
@@ -248,7 +249,7 @@ END IF
        !print *,ipkas
 choiceloop:DO WHILE (.not.found) 
         CALL random_number(ireal)
-        choice=NINT(ireal*REAL(natoms,DBL))
+        choice=NINT(ireal*REAL(natoms,DBL), KIND=8)
         !PRINT *,choice,num_events,ipkas,isteps
         ! in a given timestep, we are allowing the same atom to be hit twice
         ! first check if atom has been hit before
@@ -663,7 +664,8 @@ END SUBROUTINE define_atom
 SUBROUTINE initial_config
   use configs
   implicit none
-  INTEGER :: jcount,kcount,choice,inn,numbertype
+  INTEGER :: jcount,kcount,choice,numbertype
+  INTEGER(KIND=8) :: inn
   CHARACTER (LEN=500) :: outstr
   REAL (KIND=DBL) :: ireal,xp(3),pi
       
@@ -677,19 +679,19 @@ SUBROUTINE initial_config
   IF(box_type==1) THEN
    ! we don't do this anymore - create on the fly
    !CALL create_bcc(x,box_nunits,natoms,latt,lx)
-   natoms=2*box_nunits**3
+   natoms=2_8*INT(box_nunits,8)**3
     lx(1)=REAL(box_nunits,DBL)*latt
     lx(2)=REAL(box_nunits,DBL)*latt
     lx(3)=REAL(box_nunits,DBL)*latt   
   ELSEIF (box_type==2) THEN
    !CALL create_fcc(x,natoms)
-   natoms=4*box_nunits**3
+   natoms=4_8*INT(box_nunits,8)**3
     lx(1)=REAL(box_nunits,DBL)*latt
     lx(2)=REAL(box_nunits,DBL)*latt
     lx(3)=REAL(box_nunits,DBL)*latt   
   ELSEIF (box_type==3) THEN
    !CALL create_fcc(x,natoms)
-   natoms=2*box_nunits**3   
+   natoms=2_8*INT(box_nunits,8)**3   
     lx(1)=REAL(box_nunits,DBL)*latt
     lx(2)=REAL(box_nunits,DBL)*latt*cos(pi/6.0_DBL)
     lx(3)=REAL(box_nunits,DBL)*latt*sqrt(3.0_DBL)   

@@ -9,11 +9,11 @@
       SUBROUTINE create_bcc()
       use configs
       IMPLICIT NONE
-      integer :: islx
-      integer :: isly,islz
+      integer(KIND=8) :: islx
+      integer(KIND=8) :: isly,islz
       
-      INTEGER, allocatable :: id(:)
-      integer :: ijk
+      INTEGER(KIND=8), allocatable :: id(:)
+      integer(KIND=8) :: ijk
       REAL (KIND=DBL) :: ww(3)
 
       islx=box_nunits
@@ -61,12 +61,12 @@ END SUBROUTINE create_bcc
       SUBROUTINE define_atom_position_bcc(nn,xx)
       use configs
       IMPLICIT NONE
-      integer, INTENT(in) :: nn ! atom number
-      integer :: isly,islz,islx
+      integer(KIND=8), INTENT(in) :: nn ! atom number
+      integer(KIND=8) :: isly,islz,islx
       REAL (KIND=DBL), intent(out) :: xx(3) 
       
 
-      integer :: ijk
+      integer(KIND=8) :: ijk
 
       islx=box_nunits
       isly=islx
