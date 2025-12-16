@@ -13,6 +13,18 @@ MODULE configs
   REAL (KIND=DBL), ALLOCATABLE :: pka_events_vec(:,:),pka_events_ke(:),pka_min_sep(:,:)
   INTEGER, ALLOCATABLE :: pka_events_mass(:),pka_events_step(:)
   CHARACTER (LEN=2), ALLOCATABLE :: pka_events_ele(:)
+
+  ! Timed-config bookkeeping
+  ! max_events is the current allocated capacity of the pka_events_* arrays.
+  INTEGER :: max_events = 0
+  ! Number of columns in pka_min_sep (depends on the recoil energy grid size)
+  INTEGER :: pka_min_sep_cols = 0
+
+  ! Hash table for atom IDs that have already produced a PKA.
+  ! This enforces the constraint that a given atom cannot be selected more than once.
+  INTEGER(KIND=8), ALLOCATABLE :: used_atom_keys(:)
+  INTEGER :: used_atom_count = 0
+  REAL(KIND=DBL), PARAMETER :: used_atom_max_load = 0.70_DBL
   integer,dimension(8) :: timevalues
   
   INTEGER, PARAMETER :: num_analysis_bins=10
@@ -26,7 +38,7 @@ END MODULE configs
 SUBROUTINE create_configs
   use configs
   implicit none
-  
+  LOGICAL, EXTERNAL :: used_atoms_contains
 
   INTEGER :: jcount,kcount,num_events,num_events_previous
   INTEGER(KIND=8) :: choice
@@ -34,14 +46,11 @@ SUBROUTINE create_configs
   REAL(KIND=DBL) :: cumtime,ireal,remain,ke,jrealvector(3),irealvector(3)
   logical :: found,bca_flag
   CHARACTER (LEN=10000) :: outstr,tempstr,tempstr2
-  INTEGER :: ievent,ifiles,foundi,jevent
+  INTEGER :: ievent,ifiles,jevent
+  INTEGER :: parent_ifile,max_parent_atoms,available_parent_atoms
   CHARACTER (LEN=30) :: date
   INTEGER(8) ::itime,num_above_threshold
   REAL(KIND=DBL) :: total_channelpkas
-  INTEGER(KIND=8), ALLOCATABLE ::temp_pka_events_id(:)
-  REAL (KIND=DBL), ALLOCATABLE :: temp_pka_events_vec(:,:),temp_pka_events_ke(:),temp_pka_min_sep(:,:)
-  INTEGER, ALLOCATABLE :: temp_pka_events_mass(:),temp_pka_events_step(:)
-  CHARACTER (LEN=2), ALLOCATABLE :: temp_pka_events_ele(:)
   
   
   !16/4/19 - separation tracking
@@ -81,6 +90,17 @@ SUBROUTINE create_configs
   cumtime=timestep
   num_events=0
   num_events_previous=0
+
+  ! Reset any prior timed-config state (defensive: create_configs should behave
+  ! consistently even if called more than once in a single execution).
+  if (allocated(pka_events_id)) then
+    deallocate(pka_events_id, pka_events_vec, pka_events_ele, pka_events_mass, &
+               pka_events_step, pka_events_ke, pka_min_sep)
+  end if
+  max_events = 0
+  pka_min_sep_cols = 2*totalglobal_num_pka_recoil_points_master + 2
+  call used_atoms_reset()
+
   IF (do_bca) CALL bca_setup()
   
     call random_seed(size=getsize)
@@ -197,133 +217,76 @@ SUBROUTINE create_configs
        num_PKAs_step=num_PKAs_step+1
      END IF
      write(log_unit,*) 'channel ',ichannel,': ',num_PKAs_step,' PKAs required in timestep ',isteps 
-     ! increase arrays by required amount
-     !print *,allocated(pka_events_id)
-!stop
-IF(ALLOCATED(pka_events_id))THEN
- IF(ALLOCATED(temp_pka_events_id))THEN
-   DEALLOCATE(temp_pka_events_id,temp_pka_events_vec, &
-          temp_pka_events_ele,temp_pka_events_mass, &
-          temp_pka_events_step,temp_pka_events_ke,temp_pka_min_sep)
- END IF
- ALLOCATE(temp_pka_events_id(num_events),temp_pka_events_vec(num_events,3), &
-          temp_pka_events_ele(num_events),temp_pka_events_mass(num_events), &
-          temp_pka_events_step(num_events),temp_pka_events_ke(num_events), &
-          temp_pka_min_sep(num_events,2*totalglobal_num_pka_recoil_points_master+2))   
- temp_pka_events_id(1:num_events)=pka_events_id(1:num_events)
- temp_pka_events_vec(1:num_events,1:3)=pka_events_vec(1:num_events,1:3)
- temp_pka_events_ele(1:num_events)=pka_events_ele(1:num_events)
- temp_pka_events_mass(1:num_events)=pka_events_mass(1:num_events)
- temp_pka_events_step(1:num_events)=pka_events_step(1:num_events)
- temp_pka_events_ke(1:num_events)=pka_events_ke(1:num_events)
- temp_pka_min_sep(1:num_events,:)=pka_min_sep(1:num_events,:)
- DEALLOCATE(pka_events_id,pka_events_vec, &
-          pka_events_ele,pka_events_mass, &
-          pka_events_step,pka_events_ke,pka_min_sep)
-            
- ALLOCATE(pka_events_id(num_events+num_PKAs_step),pka_events_vec(num_events+num_PKAs_step,3), &
-          pka_events_ele(num_events+num_PKAs_step),pka_events_mass(num_events+num_PKAs_step), &
-          pka_events_step(num_events+num_PKAs_step),pka_events_ke(num_events+num_PKAs_step), &
-          pka_min_sep(num_events+num_PKAs_step,2*totalglobal_num_pka_recoil_points_master+2))
- pka_events_id(1:num_events)=temp_pka_events_id(1:num_events)
- pka_events_vec(1:num_events,1:3)=temp_pka_events_vec(1:num_events,1:3)
- pka_events_ele(1:num_events)=temp_pka_events_ele(1:num_events)
- pka_events_mass(1:num_events)=temp_pka_events_mass(1:num_events)
- pka_events_step(1:num_events)=temp_pka_events_step(1:num_events)
- pka_events_ke(1:num_events)=temp_pka_events_ke(1:num_events)  
- pka_min_sep(1:num_events,:)=temp_pka_min_sep(1:num_events,:)        
-ELSE
-  ALLOCATE(pka_events_id(num_events+num_PKAs_step),pka_events_vec(num_events+num_PKAs_step,3), &
-          pka_events_ele(num_events+num_PKAs_step),pka_events_mass(num_events+num_PKAs_step), &
-          pka_events_step(num_events+num_PKAs_step),pka_events_ke(num_events+num_PKAs_step), &
-          pka_min_sep(num_events+num_PKAs_step,2*totalglobal_num_pka_recoil_points_master+2)) 
-END IF     
+     ! If no PKAs are required for this channel in this timestep, skip the expensive
+     ! bookkeeping entirely.
+     if (num_PKAs_step <= 0) cycle
+
+     ! Map this reaction channel's parent nuclide onto one of the user-specified target species.
+     parent_ifile = 0
+     do ifiles=1,number_pka_files
+       if ((parent_num(ifiles)==config_parent_nums(ichannel)).and.&
+           (trim(adjustl(parent_ele(ifiles)))==trim(adjustl(config_parent_eles(ichannel))))) then
+         parent_ifile = ifiles
+         exit
+       end if
+     end do
+     if (parent_ifile == 0) then
+       write(log_unit,*) 'ERROR: channel ',ichannel,' parent ',trim(adjustl(config_parent_eles(ichannel))), &
+            config_parent_nums(ichannel),' did not match any input target species. Skipping.'
+       cycle
+     end if
+
+     ! Enforce: each atom can produce at most one PKA.
+     max_parent_atoms = nint(real(natoms,DBL)*pka_ratios(parent_ifile))
+     available_parent_atoms = max_parent_atoms - initial_atom_types_count(parent_ifile)
+     if (available_parent_atoms <= 0) then
+       write(log_unit,*) 'WARNING: no unused atoms of parent ',trim(adjustl(config_parent_eles(ichannel))), &
+            config_parent_nums(ichannel),' remain; skipping channel ',ichannel,' at timestep ',isteps
+       cycle
+     else if (num_PKAs_step > available_parent_atoms) then
+       write(log_unit,*) 'WARNING: reducing channel ',ichannel,' PKAs in timestep ',isteps,' from ',num_PKAs_step, &
+            ' to ',available_parent_atoms,' (finite unused parent atoms).'
+       num_PKAs_step = available_parent_atoms
+     end if
+
+     call ensure_pka_event_capacity(num_events, num_events + num_PKAs_step)
      
   !STOP   
      
     
 
-     !cycle
-     DO ipkas=1,num_PKAs_step
-       found=.false.
-       !print *,ipkas
-choiceloop:DO WHILE (.not.found) 
-        CALL random_number(ireal)
-        choice=NINT(ireal*REAL(natoms,DBL), KIND=8)
-        !PRINT *,choice,num_events,ipkas,isteps
-        ! in a given timestep, we are allowing the same atom to be hit twice
-        ! first check if atom has been hit before
-        ievent=1
-        foundi=num_events+1
-        DO 
-         IF(ievent.gt.num_events) exit
-         !5/4/2019 we are now keeping all events, so atoms may appear more than once
-         ! search whole list and take last state.
-         !print *,choice,pka_events_id(ievent),ievent,num_events
-         IF(choice==pka_events_id(ievent)) foundi=ievent
-         ievent=ievent+1
-        END DO
-        
-        IF(foundi.LE.num_events) THEN
-         IF((pka_events_mass(foundi)==config_parent_nums(ichannel)).AND. &
-(TRIM(ADJUSTL(pka_events_ele(foundi)))==TRIM(ADJUSTL(config_parent_eles(ichannel))))) THEN 
-          found=.true.
-         END IF
-        ELSE
-         ! here we have selected an atom not previously assigned
-         ! to avoid conflict we must assume that it can be given the correct parent type
-         ! (it has already been selected at random, so this is OK)
-         ! provided we have not reached the maximum for the parent atom type
-         ! first see if it (the parent) is one of the input types (must be)
-         ifiles=1
-         DO 
-           IF(ifiles.GT.number_pka_files) cycle choiceloop ! shouldn't happen
-           !PRINT *,parent_num(i),config_parent_nums(ichannel)
-           !PRINT *,TRIM(ADJUSTL(parent_ele(i))),TRIM(ADJUSTL(config_parent_eles(ichannel)))
-           IF((parent_num(ifiles)==config_parent_nums(ichannel)).AND. &
-(TRIM(ADJUSTL(parent_ele(ifiles)))==TRIM(ADJUSTL(config_parent_eles(ichannel))))) EXIT
-           ifiles=ifiles+1
-         END DO
-         IF(initial_atom_types_count(ifiles).GE.NINT(REAL(natoms,DBL)*pka_ratios(ifiles))) THEN
-          ! cannot have any more target atoms of this type
-          ! need to cycle and find one already defined
-          cycle choiceloop
-         END IF
-         initial_atom_types_count(ifiles)=initial_atom_types_count(ifiles)+1
-         found=.true.
-         !ievent=num_events+1
-         !num_events=num_events+1
-         !16/4/19 - don't need this for on the fly assignment
-         !IF(num_events.GT.max_events) THEN
-         ! PRINT *,'maximum number of PKA events exceeded'
-         ! PRINT *,'consider reducing timestep'
-         ! STOP
-         !END IF
-         !pka_events_step(ievent)=0 ! so that we know to reset velocities, etc
-         ! don't need to assign atom type officially as is about to change
-        END IF ! ievent<num_events
-         
-       END DO choiceloop!found
-       
-       !15/4/2019
-       ! WILL always be new event - check for repeat atoms now only confirms that
-       ! it is possible for a previously defined atom to undergo this event
-       ievent=num_events+1
-       num_events=num_events+1
-       
-       !PKA found
-       pka_events_id(ievent)=choice
-       pka_events_mass(ievent)=config_daughter_nums(ichannel)
-       pka_events_ele(ievent)=config_daughter_eles(ichannel)
-       
-       ! now define velocity/energy
-       !IF(pka_events_step(ievent).NE.isteps) THEN
-        pka_events_vec(ievent,:)=0._DBL ! reset for new timestep (only once)
-        pka_events_ke(ievent)=0._DBL
-        pka_min_sep(ievent,1)=REAL(box_nunits,DBL)*latt
-        pka_min_sep(ievent,2:)=0._DBL
-       !END IF
-       pka_events_step(ievent)=isteps
+	     ! Generate the required number of PKAs for this channel in this timestep.
+	     ! NOTE: An atom is not allowed to produce more than one PKA over the whole
+	     ! simulation. If a selected atom is rejected, we resample *only* the atom ID
+	     ! (i.e. keep the same channel/parent selection), as requested.
+	     DO ipkas=1,num_PKAs_step
+	       found=.false.
+	choiceloop:DO WHILE (.not.found)
+	        CALL random_number(ireal)
+	        choice=INT(ireal*REAL(natoms,DBL), KIND=8)+1_8
+	        IF(used_atoms_contains(choice)) CYCLE choiceloop
+	        found=.true.
+	       END DO choiceloop
+	
+	       ievent=num_events+1
+	       num_events=num_events+1
+	
+	       ! Mark the chosen atom as used immediately (prevents duplicates both within
+	       ! the same timestep and across all subsequent timesteps).
+	       CALL used_atoms_insert(choice)
+	       initial_atom_types_count(parent_ifile)=initial_atom_types_count(parent_ifile)+1
+	
+	       !PKA found
+	       pka_events_id(ievent)=choice
+	       pka_events_mass(ievent)=config_daughter_nums(ichannel)
+	       pka_events_ele(ievent)=config_daughter_eles(ichannel)
+	
+	       ! now define velocity/energy
+	        pka_events_vec(ievent,:)=0._DBL ! reset for new timestep (only once)
+	        pka_events_ke(ievent)=0._DBL
+	        pka_min_sep(ievent,1)=REAL(box_nunits,DBL)*latt
+	        pka_min_sep(ievent,2:)=0._DBL
+	       pka_events_step(ievent)=isteps
        
        ! 15/4/2019 - select from cumulative
        CALL random_number(ireal)
@@ -621,6 +584,229 @@ if(do_bca) call bca_close()
 
 
 END SUBROUTINE create_configs
+
+
+!-------------------------------------------------------------------------------
+! Helper procedures for timed-config generation
+!-------------------------------------------------------------------------------
+
+SUBROUTINE ensure_pka_event_capacity(num_events, min_capacity)
+  ! Ensure the pka_events_* arrays are allocated with at least min_capacity rows.
+  ! Uses a geometric growth strategy so the arrays do *not* get reallocated and
+  ! copied every timestep.
+  use configs
+  implicit none
+  INTEGER, intent(in) :: num_events
+  INTEGER, intent(in) :: min_capacity
+
+  INTEGER :: new_capacity
+
+  INTEGER(KIND=8), ALLOCATABLE :: tmp_id(:)
+  REAL (KIND=DBL), ALLOCATABLE :: tmp_vec(:,:),tmp_ke(:),tmp_min_sep(:,:)
+  INTEGER, ALLOCATABLE :: tmp_mass(:),tmp_step(:)
+  CHARACTER (LEN=2), ALLOCATABLE :: tmp_ele(:)
+
+  if (min_capacity <= max_events) return
+
+  if (pka_min_sep_cols <= 0) then
+    write(*,*) 'ERROR (ensure_pka_event_capacity): pka_min_sep_cols not initialised.'
+    stop
+  end if
+
+  if (max_events <= 0) then
+    new_capacity = max(1024, min_capacity)
+  else
+    new_capacity = max(max_events*2, min_capacity)
+  end if
+
+  ! Allocate temporaries and copy any existing data
+  allocate(tmp_id(new_capacity), tmp_vec(new_capacity,3), tmp_ele(new_capacity), &
+           tmp_mass(new_capacity), tmp_step(new_capacity), tmp_ke(new_capacity), &
+           tmp_min_sep(new_capacity,pka_min_sep_cols))
+
+  tmp_id = 0_8
+  tmp_vec = 0._DBL
+  tmp_ele = '  '
+  tmp_mass = 0
+  tmp_step = 0
+  tmp_ke = 0._DBL
+  tmp_min_sep = 0._DBL
+
+  if (allocated(pka_events_id)) then
+    if (num_events > 0) then
+      tmp_id(1:num_events) = pka_events_id(1:num_events)
+      tmp_vec(1:num_events,1:3) = pka_events_vec(1:num_events,1:3)
+      tmp_ele(1:num_events) = pka_events_ele(1:num_events)
+      tmp_mass(1:num_events) = pka_events_mass(1:num_events)
+      tmp_step(1:num_events) = pka_events_step(1:num_events)
+      tmp_ke(1:num_events) = pka_events_ke(1:num_events)
+      tmp_min_sep(1:num_events,:) = pka_min_sep(1:num_events,:)
+    end if
+
+    deallocate(pka_events_id, pka_events_vec, pka_events_ele, pka_events_mass, &
+               pka_events_step, pka_events_ke, pka_min_sep)
+  end if
+
+  ! Allocate the resized arrays and copy back
+  allocate(pka_events_id(new_capacity), pka_events_vec(new_capacity,3), &
+           pka_events_ele(new_capacity), pka_events_mass(new_capacity), &
+           pka_events_step(new_capacity), pka_events_ke(new_capacity), &
+           pka_min_sep(new_capacity,pka_min_sep_cols))
+
+  pka_events_id = tmp_id
+  pka_events_vec = tmp_vec
+  pka_events_ele = tmp_ele
+  pka_events_mass = tmp_mass
+  pka_events_step = tmp_step
+  pka_events_ke = tmp_ke
+  pka_min_sep = tmp_min_sep
+
+  deallocate(tmp_id, tmp_vec, tmp_ele, tmp_mass, tmp_step, tmp_ke, tmp_min_sep)
+
+  max_events = new_capacity
+END SUBROUTINE ensure_pka_event_capacity
+
+
+SUBROUTINE used_atoms_reset()
+  ! Initialise / reset the hash table used to track which atoms have already
+  ! produced a PKA.
+  use configs
+  implicit none
+  INTEGER :: initial_size
+
+  initial_size = 1024
+  used_atom_count = 0
+  if (allocated(used_atom_keys)) deallocate(used_atom_keys)
+  allocate(used_atom_keys(initial_size))
+  used_atom_keys = 0_8
+END SUBROUTINE used_atoms_reset
+
+
+LOGICAL FUNCTION used_atoms_contains(key)
+  use configs
+  implicit none
+  INTEGER(KIND=8), intent(in) :: key
+
+  INTEGER :: idx, n, steps
+  INTEGER(KIND=8) :: idx8
+
+  if (.not.allocated(used_atom_keys)) then
+    used_atoms_contains = .false.
+    return
+  end if
+
+  n = size(used_atom_keys)
+  if (n <= 0) then
+    used_atoms_contains = .false.
+    return
+  end if
+
+  idx8 = modulo(key, int(n, kind=8)) + 1_8
+  idx = int(idx8)
+
+  do steps = 1, n
+    if (used_atom_keys(idx) == 0_8) then
+      used_atoms_contains = .false.
+      return
+    end if
+    if (used_atom_keys(idx) == key) then
+      used_atoms_contains = .true.
+      return
+    end if
+    idx = idx + 1
+    if (idx > n) idx = 1
+  end do
+
+  used_atoms_contains = .false.
+END FUNCTION used_atoms_contains
+
+
+SUBROUTINE used_atoms_insert(key)
+  use configs
+  implicit none
+  INTEGER(KIND=8), intent(in) :: key
+
+  INTEGER :: n, new_size
+  REAL(KIND=DBL) :: load
+
+  if (.not.allocated(used_atom_keys)) call used_atoms_reset()
+
+  n = size(used_atom_keys)
+  if (n <= 0) then
+    call used_atoms_reset()
+    n = size(used_atom_keys)
+  end if
+
+  load = real(used_atom_count + 1, kind=DBL) / real(n, kind=DBL)
+  if (load > used_atom_max_load) then
+    new_size = max(2*n, 1024)
+    call used_atoms_rehash(new_size)
+  end if
+
+  call used_atoms_insert_direct(key)
+END SUBROUTINE used_atoms_insert
+
+
+SUBROUTINE used_atoms_insert_direct(key)
+  ! Insert without triggering a resize (used during rehash).
+  use configs
+  implicit none
+  INTEGER(KIND=8), intent(in) :: key
+
+  INTEGER :: idx, n
+  INTEGER(KIND=8) :: idx8
+
+  n = size(used_atom_keys)
+  idx8 = modulo(key, int(n, kind=8)) + 1_8
+  idx = int(idx8)
+
+  do
+    if (used_atom_keys(idx) == 0_8) then
+      used_atom_keys(idx) = key
+      used_atom_count = used_atom_count + 1
+      return
+    else if (used_atom_keys(idx) == key) then
+      return
+    end if
+
+    idx = idx + 1
+    if (idx > n) idx = 1
+  end do
+END SUBROUTINE used_atoms_insert_direct
+
+
+SUBROUTINE used_atoms_rehash(new_size)
+  use configs
+  implicit none
+  INTEGER, intent(in) :: new_size
+
+  INTEGER(KIND=8), ALLOCATABLE :: old_keys(:)
+  INTEGER :: old_size, ii
+
+  if (new_size <= 0) return
+
+  if (.not.allocated(used_atom_keys)) then
+    allocate(used_atom_keys(new_size))
+    used_atom_keys = 0_8
+    used_atom_count = 0
+    return
+  end if
+
+  old_size = size(used_atom_keys)
+  allocate(old_keys(old_size))
+  old_keys = used_atom_keys
+
+  deallocate(used_atom_keys)
+  allocate(used_atom_keys(new_size))
+  used_atom_keys = 0_8
+  used_atom_count = 0
+
+  do ii = 1, old_size
+    if (old_keys(ii) /= 0_8) call used_atoms_insert_direct(old_keys(ii))
+  end do
+
+  deallocate(old_keys)
+END SUBROUTINE used_atoms_rehash
 
 
 SUBROUTINE define_atom(atmass,atele,numbertype)
